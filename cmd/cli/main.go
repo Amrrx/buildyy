@@ -8,8 +8,8 @@ import (
 	"buildy/pkg/config"
 	"buildy/pkg/logging"
 	"buildy/pkg/reporting"
-	"buildy/pkg/versioning"
 	"buildy/pkg/changelog"
+	"buildy/pkg/versioning"
 	"github.com/spf13/cobra"
 )
 
@@ -51,7 +51,7 @@ func runBuild(cmd *cobra.Command, args []string) {
 	for i, subProject := range cfg.SubProjects {
 		if buildResults[subProject.Name] == nil {
 
-			versionIncrement := analyzer.DetermineVersionIncrement(subProject, repo)
+			versionIncrement := "patch"
 			
 			// Increment the version if the build was successful
 			newVersion := versioning.IncrementVersion(subProject.Version, versionIncrement)
@@ -88,4 +88,14 @@ func runBuild(cmd *cobra.Command, args []string) {
 	}
 
 	logger.Info.Println("Build completed successfully")
+}
+
+
+func getSubProjectByName(subProjects []config.SubProject, name string) *config.SubProject {
+	for _, subProject := range subProjects {
+		if subProject.Name == name {
+			return &subProject
+		}
+	}
+	return nil
 }
