@@ -4,11 +4,13 @@ package main
 import (
 	"os"
 
-	"github.com/spf13/cobra"
 	"buildy/pkg/build"
 	"buildy/pkg/config"
 	"buildy/pkg/logging"
 	"buildy/pkg/reporting"
+	"buildy/pkg/versioning"
+	"buildy/pkg/changelog"
+	"github.com/spf13/cobra"
 )
 
 var (
@@ -45,6 +47,32 @@ func runBuild(cmd *cobra.Command, args []string) {
 
 	// Run the build process
 	buildResults := build.RunBuild(cfg, logger)
+
+	for i, subProject := range cfg.SubProjects {
+		if buildResults[subProject.Name] == nil {
+
+			versionIncrement := analyzer.DetermineVersionIncrement(subProject, repo)
+			
+			// Increment the version if the build was successful
+			newVersion := versioning.IncrementVersion(subProject.Version, versionIncrement)
+			cfg.SubProjects[i].Version = newVersion
+			logger.Info.Printf("Subproject %s version updated to %s\n", subProject.Name, newVersion)
+		}
+	}
+
+	// Generate the changelog
+	err = changelog.GenerateChangelogs(cfg, outputDir)
+	if err != nil {
+		logger.Error.Printf("Error generating changelog: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Save the updated configuration file
+	err = config.SaveConfig(configFile, cfg)
+	if err != nil {
+		logger.Error.Printf("Error saving configuration file: %v\n", err)
+		os.Exit(1)
+	}
 
 	// Generate and save the build report
 	report, err := reporting.GenerateBuildReport(cfg, buildResults)

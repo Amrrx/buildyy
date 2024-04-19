@@ -54,3 +54,31 @@ func (v *Version) IncrementMinor() {
 func (v *Version) IncrementPatch() {
 	v.Patch++
 }
+
+func IncrementVersion(currentVersion string, versionIncrement string) string {
+	parts := strings.Split(currentVersion, ".")
+	if len(parts) != 3 {
+		return currentVersion
+	}
+
+	major, _ := strconv.Atoi(parts[0])
+	minor, _ := strconv.Atoi(parts[1])
+	patch, _ := strconv.Atoi(parts[2])
+
+	switch versionIncrement {
+	case "patch":
+		patch++
+	case "minor":
+		minor++
+		patch = 0
+	case "major":
+		major++
+		minor = 0
+		patch = 0
+	default:
+		// If an invalid increment is provided, return the current version
+		return currentVersion
+	}
+
+	return fmt.Sprintf("%d.%d.%d", major, minor, patch)
+}

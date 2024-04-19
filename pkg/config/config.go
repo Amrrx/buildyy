@@ -18,6 +18,8 @@ type SubProject struct {
 }
 
 type Config struct {
+	Name       string   `yaml:"name"`
+	Version    string   `yaml:"version"`
 	SubProjects []SubProject `yaml:"subProjects"`
 }
 
@@ -34,4 +36,19 @@ func ParseConfig(configFile string) (*Config, error) {
 	}
 
 	return &config, nil
+}
+
+
+func SaveConfig(configFile string, config *Config) error {
+	data, err := yaml.Marshal(config)
+	if err != nil {
+		return fmt.Errorf("error marshaling config: %v", err)
+	}
+
+	err = ioutil.WriteFile(configFile, data, 0644)
+	if err != nil {
+		return fmt.Errorf("error writing config file: %v", err)
+	}
+
+	return nil
 }
