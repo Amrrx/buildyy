@@ -1,0 +1,10 @@
+Build Report - 2024-04-19T10:12:44+02:00
+
+Subproject: subproject1
+Version: 1.0.0
+Status: Success
+
+Subproject: subproject2
+Version: 2.0.0
+Status: Success
+
