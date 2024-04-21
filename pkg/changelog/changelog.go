@@ -20,7 +20,6 @@ import (
 )
 
 // TODO: Fix issue in central log that each build fetches the complete commits
-// TODO: Fix issue in sub logs that does not fetch any commits
 
 func GenerateChangelogs(cfg *config.Config, outputDir string) error {
 	// Open the main Git repository
@@ -125,14 +124,14 @@ func updateCentralizedChangelog(changelogFile string, subProjects []config.SubPr
 		}
 	}
 
-	// TODO: Fix issue of writing the signature
+	commitObj, err := getCommitByHash(repo, latestCentralCommit)
 	// Generate the commit information
 	var commitInfo string
 	if latestCentralCommit != "" {
 		commitInfo = fmt.Sprintf("Commit: %s\n", latestCentralCommit)
-		commitInfo += fmt.Sprintf("Author: %s\n", latestCentralCommit)
-		commitInfo += fmt.Sprintf("Date: %s\n", latestCentralCommit)
-		commitInfo += fmt.Sprintf("Message: %s\n", latestCentralCommit)
+		commitInfo += fmt.Sprintf("Author: %s\n", &commitObj.Author)
+		commitInfo += fmt.Sprintf("Date: %s\n", commitObj.Author.When)
+		commitInfo += fmt.Sprintf("Message: %s\n", commitObj.Message)
 	} else {
 		// Use default values if no commit data is found
 		buildNumber := os.Getenv("BUILD_NUMBER")
@@ -237,48 +236,45 @@ func getLastSubProjectCommitsFromChangelog(changelogFile string) (map[string]str
 
 func getCommitsBetween(repo *git.Repository, oldCommit, newCommit string) ([]*object.Commit, error) {
 	var commits []*object.Commit
-    var collecting bool
+	var collecting bool
 
-    // Start log from the beginning since no specific starting point is provided
-    iter, err := repo.Log(&git.LogOptions{})
-    if err != nil {
-        return nil, err
-    }
-    defer iter.Close()
+	// Start log from the beginning since no specific starting point is provided
+	iter, err := repo.Log(&git.LogOptions{})
+	if err != nil {
+		return nil, err
+	}
+	defer iter.Close()
 
-    // Iterate over commits from newest to oldest
-    err = iter.ForEach(func(commit *object.Commit) error {
-        fmt.Println(commit.Hash.String())  // Print each commit hash for debugging
+	// Iterate over commits from newest to oldest
+	err = iter.ForEach(func(commit *object.Commit) error {
 
-        // Start collecting commits if newCommit is found
-        if commit.Hash.String() == newCommit {
-            collecting = true
-        }
+		// Start collecting commits if newCommit is found
+		if commit.Hash.String() == newCommit {
+			collecting = true
+		}
 
-        // Collect commits if we are within the range
-        if collecting {
-            commits = append(commits, commit)
-        }
+		// Collect commits if we are within the range
+		if collecting {
+			commits = append(commits, commit)
+		}
 
-        // Stop collecting when oldCommit is found
-        if commit.Hash.String() == oldCommit && collecting {
-            return storer.ErrStop  // Stop after adding oldCommit
-        }
+		// Stop collecting when oldCommit is found
+		if commit.Hash.String() == oldCommit && collecting {
+			return storer.ErrStop // Stop after adding oldCommit
+		}
 
-        return nil
-    })
-    if err != nil && err != storer.ErrStop {
-        return nil, err
-    }
+		return nil
+	})
+	if err != nil && err != storer.ErrStop {
+		return nil, err
+	}
 
-    // Verify if the required commits were collected
-    if len(commits) == 0 || commits[len(commits)-1].Hash.String() != oldCommit {
-        return nil, fmt.Errorf("could not find a valid range between %s and %s", newCommit, oldCommit)
-    }
+	// Verify if the required commits were collected
+	if len(commits) == 0 || commits[len(commits)-1].Hash.String() != oldCommit {
+		return nil, fmt.Errorf("could not find a valid range between %s and %s", newCommit, oldCommit)
+	}
 
-
-
-    return commits, nil
+	return commits, nil
 }
 
 func getFirstCommit(repo *git.Repository) (string, error) {
@@ -351,23 +347,34 @@ func getCommitsUpTo(repo *git.Repository, latestCommit string) ([]*object.Commit
 		return nil, err
 	}
 
-	// Reverse the order of commits to get the oldest commit first
-	for i, j := 0, len(commits)-1; i < j; i, j = i+1, j-1 {
-		commits[i], commits[j] = commits[j], commits[i]
-	}
-
 	return commits, nil
 }
 
 func stringToHash(hashString string) (plumbing.Hash, error) {
-    if len(hashString) != 40 {
-        return plumbing.ZeroHash, fmt.Errorf("invalid hash length for string: %s", hashString)
-    }
-    for _, c := range hashString {
-        if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
-            return plumbing.ZeroHash, fmt.Errorf("invalid hash string contains non-hexadecimal character: %s", hashString)
-        }
-    }
-    hash := plumbing.NewHash(hashString)
-    return hash, nil
+	if len(hashString) != 40 {
+		return plumbing.ZeroHash, fmt.Errorf("invalid hash length for string: %s", hashString)
+	}
+	for _, c := range hashString {
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+			return plumbing.ZeroHash, fmt.Errorf("invalid hash string contains non-hexadecimal character: %s", hashString)
+		}
+	}
+	hash := plumbing.NewHash(hashString)
+	return hash, nil
+}
+
+func getCommitByHash(repo *git.Repository, commitHash string) (*object.Commit, error) {
+	// Convert the commit hash string to a plumbing.Hash
+	hash := plumbing.NewHash(commitHash)
+	if hash == plumbing.ZeroHash {
+		return nil, fmt.Errorf("invalid hash string: %s", commitHash)
+	}
+
+	// Retrieve the commit object using the hash
+	commit, err := repo.CommitObject(hash)
+	if err != nil {
+		return nil, fmt.Errorf("commit not found: %s", commitHash)
+	}
+
+	return commit, nil
 }
