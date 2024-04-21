@@ -11,9 +11,9 @@ import (
 
 	"buildy/pkg/config"
 
+	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/plumbing/storer"
 	"github.com/go-git/go-git/v5"
-	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
@@ -26,13 +26,13 @@ func GenerateChangelogs(cfg *config.Config, outputDir string) error {
 
 	// Read the centralized changelog file
 	centralizedChangelogFile := filepath.Join(outputDir, "CHANGELOG.md")
-	lastSubProjectCommits, err := getLastSubProjectCommitsFromChangelog(centralizedChangelogFile, mainRepo)
+	lastSubProjectCommits, err := getLastSubProjectCommitsFromChangelog(centralizedChangelogFile)
 	if err != nil {
 		return fmt.Errorf("error getting last subproject commits from centralized changelog: %v", err)
 	}
 
 	// Create a slice to store the subproject commits in the correct order
-	subProjectCommits := make([]*object.Commit, len(cfg.SubProjects))
+	subProjectCommits := make([]string, len(cfg.SubProjects))
 
 	// Generate changelog for each subproject
 	for i, subProject := range cfg.SubProjects {
@@ -50,14 +50,15 @@ func GenerateChangelogs(cfg *config.Config, outputDir string) error {
 
 		// Get the latest commit from the subproject repository
 		latestSubProjectCommit, err := getLastCommit(subProjectRepo)
+
 		if err != nil {
 			return fmt.Errorf("error getting latest commit for subproject %s: %v", subProject.Name, err)
 		}
 
 		// If no commits are saved in the centralized changelog, get the first commit from the subproject repository
-		if lastSubProjectCommit == nil {
-			fmt.Println("No commits, first time")
+		if len(lastSubProjectCommit) == 0 {
 			firstSubProjectCommit, err := getFirstCommit(subProjectRepo)
+
 			if err != nil {
 				return fmt.Errorf("error getting first commit for subproject %s: %v", subProject.Name, err)
 			}
@@ -82,7 +83,7 @@ func GenerateChangelogs(cfg *config.Config, outputDir string) error {
 	return nil
 }
 
-func updateCentralizedChangelog(changelogFile string, subProjects []config.SubProject, repo *git.Repository, centralVersion string, subProjectCommits []*object.Commit) error {
+func updateCentralizedChangelog(changelogFile string, subProjects []config.SubProject, repo *git.Repository, centralVersion string, subProjectCommits []string) error {
 	// Read the existing changelog content
 	content, _ := ioutil.ReadFile(changelogFile)
 
@@ -93,8 +94,8 @@ func updateCentralizedChangelog(changelogFile string, subProjects []config.SubPr
 	entry := fmt.Sprintf("## [%s] - %s\n\n", centralVersion, currentDate)
 	for i, subProject := range subProjects {
 		entry += fmt.Sprintf("### %s\n", subProject.Name)
-		if subProjectCommits[i] != nil {
-			entry += fmt.Sprintf("- Updated to version %s | %s\n", subProject.Version, subProjectCommits[i].Hash.String())
+		if subProjectCommits[i] != "" {
+			entry += fmt.Sprintf("- Updated to version %s | %s\n", subProject.Version, subProjectCommits[i])
 		} else {
 			entry += fmt.Sprintf("- Updated to version %s\n", subProject.Version)
 		}
@@ -122,11 +123,11 @@ func updateCentralizedChangelog(changelogFile string, subProjects []config.SubPr
 
 	// Generate the commit information
 	var commitInfo string
-	if latestCentralCommit != nil {
-		commitInfo = fmt.Sprintf("Commit: %s\n", latestCentralCommit.Hash.String())
-		commitInfo += fmt.Sprintf("Author: %s\n", latestCentralCommit.Author.Name)
-		commitInfo += fmt.Sprintf("Date: %s\n", latestCentralCommit.Author.When.Format("2006-01-02"))
-		commitInfo += fmt.Sprintf("Message: %s\n", latestCentralCommit.Message)
+	if latestCentralCommit != "" {
+		commitInfo = fmt.Sprintf("Commit: %s\n", latestCentralCommit)
+		commitInfo += fmt.Sprintf("Author: %s\n", latestCentralCommit)
+		commitInfo += fmt.Sprintf("Date: %s\n", latestCentralCommit)
+		commitInfo += fmt.Sprintf("Message: %s\n", latestCentralCommit)
 	} else {
 		// Use default values if no commit data is found
 		buildNumber := os.Getenv("BUILD_NUMBER")
@@ -152,53 +153,7 @@ func updateCentralizedChangelog(changelogFile string, subProjects []config.SubPr
 	return nil
 }
 
-// func updateCentralizedChangelog(changelogFile string, subProjects []config.SubProject, latestCommit *object.Commit, centralVersion string) error {
-// 	// Read the existing changelog content
-// 	content, _ := ioutil.ReadFile(changelogFile)
-
-// 	// Get the current date
-// 	currentDate := time.Now().Format("2006-01-02")
-
-// 	// Generate the new changelog entry
-// 	entry := fmt.Sprintf("## [%s] - %s\n\n", centralVersion, currentDate)
-// 	for _, subProject := range subProjects {
-// 		entry += fmt.Sprintf("### %s\n", subProject.Name)
-// 		entry += fmt.Sprintf("- Updated to version %s | %s\n", subProject.Version, latestCommit.Hash.String())
-// 	}
-
-// 	// Generate the commit information
-// 	var commitInfo string
-// 	if latestCommit != nil {
-// 		commitInfo = fmt.Sprintf("Commit: %s\n", latestCommit.Hash.String())
-// 		commitInfo += fmt.Sprintf("Author: %s\n", latestCommit.Author.Name)
-// 		commitInfo += fmt.Sprintf("Date: %s\n", latestCommit.Author.When.Format("2006-01-02"))
-// 		commitInfo += fmt.Sprintf("Message: %s\n", latestCommit.Message)
-// 	} else {
-// 		// Use default values if no commit data is found
-// 		buildNumber := os.Getenv("BUILD_NUMBER")
-// 		if buildNumber == "" {
-// 			buildNumber = "Unknown"
-// 		}
-// 		hostname, _ := os.Hostname()
-// 		commitInfo = fmt.Sprintf("Commit: %s\n", buildNumber)
-// 		commitInfo += fmt.Sprintf("Author: %s\n", hostname)
-// 		commitInfo += fmt.Sprintf("Date: %s\n", currentDate)
-// 		commitInfo += "Message: Build Message <Recommend>\n"
-// 	}
-
-// 	// Combine the entry and commit information
-// 	updatedContent := fmt.Sprintf("%s\n%s\n%s", entry, commitInfo, string(content))
-
-// 	// Write the updated content back to the changelog file
-// 	err := ioutil.WriteFile(changelogFile, []byte(updatedContent), 0644)
-// 	if err != nil {
-// 		return fmt.Errorf("error writing centralized changelog file: %v", err)
-// 	}
-
-// 	return nil
-// }
-
-func generateSubProjectChangelog(subProject config.SubProject, subProjectDir string, repo *git.Repository, lastSubProjectCommit, latestSubProjectCommit *object.Commit) error {
+func generateSubProjectChangelog(subProject config.SubProject, subProjectDir string, repo *git.Repository, lastSubProjectCommit, latestSubProjectCommit string) error {
 	changelogFile := filepath.Join(subProjectDir, "CHANGELOG.md")
 
 	// Create the directory if it doesn't exist
@@ -240,8 +195,8 @@ func generateSubProjectChangelog(subProject config.SubProject, subProjectDir str
 	return nil
 }
 
-func getLastSubProjectCommitsFromChangelog(changelogFile string, repo *git.Repository) (map[string]*object.Commit, error) {
-	lastSubProjectCommits := make(map[string]*object.Commit)
+func getLastSubProjectCommitsFromChangelog(changelogFile string) (map[string]string, error) {
+	lastSubProjectCommits := make(map[string]string)
 
 	// Read the centralized changelog file
 	content, err := ioutil.ReadFile(changelogFile)
@@ -255,18 +210,18 @@ func getLastSubProjectCommitsFromChangelog(changelogFile string, repo *git.Repos
 
 	// Parse the last subproject commit hashes from the changelog
 	lines := strings.Split(string(content), "\n")
-	subProject := ""
+	subProjects := make([]string, 0)
 	for _, line := range lines {
+		line = strings.TrimSpace(line)
 		if strings.HasPrefix(line, "### ") {
-			subProject = strings.TrimSpace(line[4:])
-		} else if strings.Contains(line, " | ") {
-			parts := strings.Split(line, " | ")
-			if len(parts) == 2 {
+			subProject := strings.TrimSpace(line[4:])
+			subProjects = append(subProjects, subProject)
+		} else if strings.HasPrefix(line, "- Updated to version") {
+			parts := strings.Split(line, "|")
+			if len(parts) == 2 && len(subProjects) > 0 {
 				commitHash := strings.TrimSpace(parts[1])
-				commit, err := repo.CommitObject(plumbing.NewHash(commitHash))
-				if err == nil {
-					lastSubProjectCommits[subProject] = commit
-				}
+				subProject := subProjects[len(subProjects)-1]
+				lastSubProjectCommits[subProject] = commitHash
 			}
 		}
 	}
@@ -274,19 +229,29 @@ func getLastSubProjectCommitsFromChangelog(changelogFile string, repo *git.Repos
 	return lastSubProjectCommits, nil
 }
 
-func getCommitsBetween(repo *git.Repository, oldCommit, newCommit *object.Commit) ([]*object.Commit, error) {
+func getCommitsBetween(repo *git.Repository, oldCommit, newCommit string) ([]*object.Commit, error) {
 	var commits []*object.Commit
 
+	hash, err := stringToHash(oldCommit)
+	if err != nil {
+		return nil, err
+	}
+
 	// Create a new commit iterator
-	iter, err := repo.Log(&git.LogOptions{From: newCommit.Hash})
+	iter, err := repo.Log(&git.LogOptions{From: hash})
 	if err != nil {
 		return nil, err
 	}
 	defer iter.Close()
 
+	hashh, err := stringToHash(newCommit)
+	if err != nil {
+		return nil, err
+	}
+
 	// Iterate through the commits until reaching the old commit
 	err = iter.ForEach(func(commit *object.Commit) error {
-		if commit.Hash == oldCommit.Hash {
+		if commit.Hash == hashh {
 			return storer.ErrStop
 		}
 		commits = append(commits, commit)
@@ -304,10 +269,10 @@ func getCommitsBetween(repo *git.Repository, oldCommit, newCommit *object.Commit
 	return commits, nil
 }
 
-func getFirstCommit(repo *git.Repository) (*object.Commit, error) {
+func getFirstCommit(repo *git.Repository) (string, error) {
 	iter, err := repo.Log(&git.LogOptions{Order: git.LogOrderCommitterTime})
 	if err != nil {
-		return nil, err
+		return "", err
 	}
 	defer iter.Close()
 
@@ -317,31 +282,36 @@ func getFirstCommit(repo *git.Repository) (*object.Commit, error) {
 		return storer.ErrStop
 	})
 	if err != nil && err != storer.ErrStop {
-		return nil, err
+		return "", err
 	}
 
-	return firstCommit, nil
+	return firstCommit.Hash.String(), nil
 }
 
-func getLastCommit(repo *git.Repository) (*object.Commit, error) {
+func getLastCommit(repo *git.Repository) (string, error) {
 	head, err := repo.Head()
 	if err != nil {
-		return nil, fmt.Errorf("error getting HEAD reference: %v", err)
+		return "", fmt.Errorf("error getting HEAD reference: %v", err)
 	}
 
 	commit, err := repo.CommitObject(head.Hash())
 	if err != nil {
-		return nil, fmt.Errorf("error getting latest commit: %v", err)
+		return "", fmt.Errorf("error getting latest commit: %v", err)
 	}
 
-	return commit, nil
+	return commit.Hash.String(), nil
 }
 
-func getCommitsUpTo(repo *git.Repository, latestCommit *object.Commit) ([]*object.Commit, error) {
+func getCommitsUpTo(repo *git.Repository, latestCommit string) ([]*object.Commit, error) {
 	var commits []*object.Commit
 
+	hash, err := stringToHash(latestCommit)
+	if err != nil {
+		return nil, err
+	}
+	
 	// Create a new commit iterator
-	iter, err := repo.Log(&git.LogOptions{From: latestCommit.Hash})
+	iter, err := repo.Log(&git.LogOptions{From: hash})
 	if err != nil {
 		return nil, err
 	}
@@ -362,4 +332,12 @@ func getCommitsUpTo(repo *git.Repository, latestCommit *object.Commit) ([]*objec
 	}
 
 	return commits, nil
+}
+
+func stringToHash(hashString string) (plumbing.Hash, error) {
+	hash := plumbing.NewHash(hashString)
+	if hash == plumbing.ZeroHash {
+		return plumbing.ZeroHash, fmt.Errorf("invalid hash string: %s", hashString)
+	}
+	return hash, nil
 }

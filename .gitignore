@@ -3,3 +3,5 @@ go.mod
 go.sum
 reports/
 *.old
+test_projects
+pr2/*

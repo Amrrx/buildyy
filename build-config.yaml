@@ -2,14 +2,14 @@ name: Buildy Automation Builds
 version: 1.0.0
 subProjects:
 - name: pr1
-  version: 1.0.26
+  version: 1.0.76
   path: ./test_projects/pr1
   buildCmd:
   - go build
   dockerfile: ./subproject1/Dockerfile
   dependsOn: []
 - name: pr2
-  version: 2.0.26
+  version: 2.0.76
   path: ./test_projects/pr2
   buildCmd:
   - go build
