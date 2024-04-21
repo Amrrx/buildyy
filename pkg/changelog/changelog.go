@@ -2,7 +2,9 @@
 package changelog
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"io/ioutil"
 	"os"
 	"path/filepath"
@@ -11,11 +13,14 @@ import (
 
 	"buildy/pkg/config"
 
-	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/plumbing/storer"
 	"github.com/go-git/go-git/v5"
+	"github.com/go-git/go-git/v5/plumbing"
 	"github.com/go-git/go-git/v5/plumbing/object"
 )
+
+// TODO: Fix issue in central log that each build fetches the complete commits
+// TODO: Fix issue in sub logs that does not fetch any commits
 
 func GenerateChangelogs(cfg *config.Config, outputDir string) error {
 	// Open the main Git repository
@@ -58,7 +63,6 @@ func GenerateChangelogs(cfg *config.Config, outputDir string) error {
 		// If no commits are saved in the centralized changelog, get the first commit from the subproject repository
 		if len(lastSubProjectCommit) == 0 {
 			firstSubProjectCommit, err := getFirstCommit(subProjectRepo)
-
 			if err != nil {
 				return fmt.Errorf("error getting first commit for subproject %s: %v", subProject.Name, err)
 			}
@@ -121,6 +125,7 @@ func updateCentralizedChangelog(changelogFile string, subProjects []config.SubPr
 		}
 	}
 
+	// TODO: Fix issue of writing the signature
 	// Generate the commit information
 	var commitInfo string
 	if latestCentralCommit != "" {
@@ -207,13 +212,12 @@ func getLastSubProjectCommitsFromChangelog(changelogFile string) (map[string]str
 		}
 		return nil, fmt.Errorf("error reading centralized changelog file: %v", err)
 	}
-
 	// Parse the last subproject commit hashes from the changelog
 	lines := strings.Split(string(content), "\n")
 	subProjects := make([]string, 0)
 	for _, line := range lines {
 		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "### ") {
+		if strings.HasPrefix(line, "### ") && !strings.Contains(line, "`### Central Repository`") {
 			subProject := strings.TrimSpace(line[4:])
 			subProjects = append(subProjects, subProject)
 		} else if strings.HasPrefix(line, "- Updated to version") {
@@ -223,6 +227,8 @@ func getLastSubProjectCommitsFromChangelog(changelogFile string) (map[string]str
 				subProject := subProjects[len(subProjects)-1]
 				lastSubProjectCommits[subProject] = commitHash
 			}
+		} else if line == "#### `### Central Repository`" {
+			break
 		}
 	}
 
@@ -231,45 +237,78 @@ func getLastSubProjectCommitsFromChangelog(changelogFile string) (map[string]str
 
 func getCommitsBetween(repo *git.Repository, oldCommit, newCommit string) ([]*object.Commit, error) {
 	var commits []*object.Commit
+    var collecting bool
 
-	hash, err := stringToHash(oldCommit)
-	if err != nil {
-		return nil, err
-	}
+    // Start log from the beginning since no specific starting point is provided
+    iter, err := repo.Log(&git.LogOptions{})
+    if err != nil {
+        return nil, err
+    }
+    defer iter.Close()
 
-	// Create a new commit iterator
-	iter, err := repo.Log(&git.LogOptions{From: hash})
-	if err != nil {
-		return nil, err
-	}
-	defer iter.Close()
+    // Iterate over commits from newest to oldest
+    err = iter.ForEach(func(commit *object.Commit) error {
+        fmt.Println(commit.Hash.String())  // Print each commit hash for debugging
 
-	hashh, err := stringToHash(newCommit)
-	if err != nil {
-		return nil, err
-	}
+        // Start collecting commits if newCommit is found
+        if commit.Hash.String() == newCommit {
+            collecting = true
+        }
 
-	// Iterate through the commits until reaching the old commit
-	err = iter.ForEach(func(commit *object.Commit) error {
-		if commit.Hash == hashh {
-			return storer.ErrStop
-		}
-		commits = append(commits, commit)
-		return nil
-	})
-	if err != nil && err != storer.ErrStop {
-		return nil, err
-	}
+        // Collect commits if we are within the range
+        if collecting {
+            commits = append(commits, commit)
+        }
 
-	// Reverse the order of commits to get the oldest commit first
-	for i, j := 0, len(commits)-1; i < j; i, j = i+1, j-1 {
-		commits[i], commits[j] = commits[j], commits[i]
-	}
+        // Stop collecting when oldCommit is found
+        if commit.Hash.String() == oldCommit && collecting {
+            return storer.ErrStop  // Stop after adding oldCommit
+        }
 
-	return commits, nil
+        return nil
+    })
+    if err != nil && err != storer.ErrStop {
+        return nil, err
+    }
+
+    // Verify if the required commits were collected
+    if len(commits) == 0 || commits[len(commits)-1].Hash.String() != oldCommit {
+        return nil, fmt.Errorf("could not find a valid range between %s and %s", newCommit, oldCommit)
+    }
+
+
+
+    return commits, nil
 }
 
 func getFirstCommit(repo *git.Repository) (string, error) {
+	iter, err := repo.Log(&git.LogOptions{Order: git.LogOrderCommitterTime})
+	if err != nil {
+		return "", err
+	}
+	defer iter.Close()
+
+	var firstCommit *object.Commit
+	// Iterate through all commits and keep the last one in the iteration
+	for {
+		commit, err := iter.Next()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return "", err
+		}
+		firstCommit = commit
+	}
+
+	if firstCommit == nil {
+		return "", errors.New("repository does not contain any commits")
+	}
+
+	return firstCommit.Hash.String(), nil
+}
+
+func getLastCommit(repo *git.Repository) (string, error) {
 	iter, err := repo.Log(&git.LogOptions{Order: git.LogOrderCommitterTime})
 	if err != nil {
 		return "", err
@@ -288,20 +327,6 @@ func getFirstCommit(repo *git.Repository) (string, error) {
 	return firstCommit.Hash.String(), nil
 }
 
-func getLastCommit(repo *git.Repository) (string, error) {
-	head, err := repo.Head()
-	if err != nil {
-		return "", fmt.Errorf("error getting HEAD reference: %v", err)
-	}
-
-	commit, err := repo.CommitObject(head.Hash())
-	if err != nil {
-		return "", fmt.Errorf("error getting latest commit: %v", err)
-	}
-
-	return commit.Hash.String(), nil
-}
-
 func getCommitsUpTo(repo *git.Repository, latestCommit string) ([]*object.Commit, error) {
 	var commits []*object.Commit
 
@@ -309,7 +334,7 @@ func getCommitsUpTo(repo *git.Repository, latestCommit string) ([]*object.Commit
 	if err != nil {
 		return nil, err
 	}
-	
+
 	// Create a new commit iterator
 	iter, err := repo.Log(&git.LogOptions{From: hash})
 	if err != nil {
@@ -335,9 +360,14 @@ func getCommitsUpTo(repo *git.Repository, latestCommit string) ([]*object.Commit
 }
 
 func stringToHash(hashString string) (plumbing.Hash, error) {
-	hash := plumbing.NewHash(hashString)
-	if hash == plumbing.ZeroHash {
-		return plumbing.ZeroHash, fmt.Errorf("invalid hash string: %s", hashString)
-	}
-	return hash, nil
+    if len(hashString) != 40 {
+        return plumbing.ZeroHash, fmt.Errorf("invalid hash length for string: %s", hashString)
+    }
+    for _, c := range hashString {
+        if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f') || (c >= 'A' && c <= 'F')) {
+            return plumbing.ZeroHash, fmt.Errorf("invalid hash string contains non-hexadecimal character: %s", hashString)
+        }
+    }
+    hash := plumbing.NewHash(hashString)
+    return hash, nil
 }
