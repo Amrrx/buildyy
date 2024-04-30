@@ -60,6 +60,12 @@ func runBuild(cmd *cobra.Command, args []string) {
 		}
 	}
 
+	//Increment central version
+	newCentralVersion := versioning.IncrementVersion(cfg.Version, "patch")
+	cfg.Version = newCentralVersion
+	logger.Info.Printf("Central Project %s version updated to %s\n", cfg.Name, newCentralVersion)
+
+
 	// Generate the changelog
 	err = changelog.GenerateChangelogs(cfg, outputDir)
 	if err != nil {
@@ -99,3 +105,8 @@ func getSubProjectByName(subProjects []config.SubProject, name string) *config.S
 	}
 	return nil
 }
+
+
+// TODO: Fix the increment of the central version as well [It doesn't increment] - Done
+// TODO: Fix the replicating of central history log [It keepy re-writing the whole history for central] - Done
+// TODO: A mechanism to stop writing logs if no new commits, maybe increase the version or introduce a build number

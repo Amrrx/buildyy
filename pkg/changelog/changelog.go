@@ -19,8 +19,6 @@ import (
 	"github.com/go-git/go-git/v5/plumbing/object"
 )
 
-// TODO: Fix issue in central log that each build fetches the complete commits
-
 func GenerateChangelogs(cfg *config.Config, outputDir string) error {
 	// Open the main Git repository
 	mainRepo, err := git.PlainOpen(".")
@@ -53,7 +51,7 @@ func GenerateChangelogs(cfg *config.Config, outputDir string) error {
 		lastSubProjectCommit := lastSubProjectCommits[subProject.Name]
 
 		// Get the latest commit from the subproject repository
-		latestSubProjectCommit, err := getLastCommit(subProjectRepo)
+		latestSubProjectCommit, err := getLatestCommit(subProjectRepo)
 
 		if err != nil {
 			return fmt.Errorf("error getting latest commit for subproject %s: %v", subProject.Name, err)
@@ -79,14 +77,14 @@ func GenerateChangelogs(cfg *config.Config, outputDir string) error {
 	}
 
 	// Update the centralized changelog
-	err = updateCentralizedChangelog(centralizedChangelogFile, cfg.SubProjects, mainRepo, cfg.Version, subProjectCommits)
+	err = updateCentralizedChangelog(centralizedChangelogFile, cfg.SubProjects, mainRepo, cfg.Version, subProjectCommits, cfg.Name)
 	if err != nil {
 		return fmt.Errorf("error updating centralized changelog: %v", err)
 	}
 	return nil
 }
 
-func updateCentralizedChangelog(changelogFile string, subProjects []config.SubProject, repo *git.Repository, centralVersion string, subProjectCommits []string) error {
+func updateCentralizedChangelog(changelogFile string, subProjects []config.SubProject, repo *git.Repository, centralVersion string, subProjectCommits []string, centralName string) error {
 	// Read the existing changelog content
 	content, _ := ioutil.ReadFile(changelogFile)
 
@@ -104,16 +102,21 @@ func updateCentralizedChangelog(changelogFile string, subProjects []config.SubPr
 		}
 	}
 
+	lastCommit, err := getLastCentralCommitsFromChangelog(changelogFile)
+	if err != nil {
+		return fmt.Errorf("error getting commits for central repository: %v", err)
+	}
+
 	// Get the latest commit from the main repository
-	latestCentralCommit, err := getLastCommit(repo)
+	latestCentralCommit, err := getLatestCommit(repo)
 	if err != nil {
 		return fmt.Errorf("error getting latest commit: %v", err)
 	}
 
-	// Get the commits up to the latest central commit
-	centralCommits, err := getCommitsUpTo(repo, latestCentralCommit)
+	// Get the commits between the last subproject commit and the latest central commit
+	centralCommits, err := getCommitsBetween(repo, lastCommit, latestCentralCommit)
 	if err != nil {
-		return fmt.Errorf("error getting commits for central repository: %v", err)
+		return fmt.Errorf("error getting commits for central project %s: %v", centralName, err)
 	}
 
 	// Add the central repository commits to the changelog entry
@@ -234,6 +237,29 @@ func getLastSubProjectCommitsFromChangelog(changelogFile string) (map[string]str
 	return lastSubProjectCommits, nil
 }
 
+func getLastCentralCommitsFromChangelog(changelogFile string) (string, error) {
+	var lastCommit string
+	// Read the centralized changelog file
+	content, err := ioutil.ReadFile(changelogFile)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// If the file doesn't exist, return an empty map
+			return "", nil
+		}
+		return "", fmt.Errorf("error reading centralized changelog file: %v", err)
+	}
+	// Parse the last subproject commit hashes from the changelog
+	lines := strings.Split(string(content), "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "Commit: ") {
+			lastCommit = strings.TrimSpace(line[7:])
+			return lastCommit, nil
+		}
+	}
+	return "", nil
+}
+
 func getCommitsBetween(repo *git.Repository, oldCommit, newCommit string) ([]*object.Commit, error) {
 	var commits []*object.Commit
 	var collecting bool
@@ -304,7 +330,7 @@ func getFirstCommit(repo *git.Repository) (string, error) {
 	return firstCommit.Hash.String(), nil
 }
 
-func getLastCommit(repo *git.Repository) (string, error) {
+func getLatestCommit(repo *git.Repository) (string, error) {
 	iter, err := repo.Log(&git.LogOptions{Order: git.LogOrderCommitterTime})
 	if err != nil {
 		return "", err
