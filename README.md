@@ -1,3 +1,5 @@
+![alt text](image.png)
+
 # Buildyy: A Comprehensive Build Automation Tool
 
 Buildyy is a robust build automation tool designed to manage and automate the building, versioning, changelog generation, and Docker image creation for multi-repo or multi-sub-project environments. This tool is particularly useful for projects consisting of several interconnected sub-projects, each with its own lifecycle and dependencies. Written in Go, Buildyy offers a high-performance, user-friendly, and scalable solution for complex build processes.
