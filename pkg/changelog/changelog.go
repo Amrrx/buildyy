@@ -102,15 +102,15 @@ func updateCentralizedChangelog(changelogFile string, subProjects []config.SubPr
 		}
 	}
 
-	lastCommit, err := getLastCentralCommitsFromChangelog(changelogFile)
-	if err != nil {
-		return fmt.Errorf("error getting commits for central repository: %v", err)
-	}
-
 	// Get the latest commit from the main repository
 	latestCentralCommit, err := getLatestCommit(repo)
 	if err != nil {
 		return fmt.Errorf("error getting latest commit: %v", err)
+	}
+
+	lastCommit, err := getLastCentralCommitsFromChangelog(changelogFile, repo)
+	if err != nil {
+		return fmt.Errorf("error getting commits for central repository: %v", err)
 	}
 
 	// Get the commits between the last subproject commit and the latest central commit
@@ -237,14 +237,18 @@ func getLastSubProjectCommitsFromChangelog(changelogFile string) (map[string]str
 	return lastSubProjectCommits, nil
 }
 
-func getLastCentralCommitsFromChangelog(changelogFile string) (string, error) {
+func getLastCentralCommitsFromChangelog(changelogFile string, centralProjectRepo *git.Repository) (string, error) {
 	var lastCommit string
 	// Read the centralized changelog file
 	content, err := ioutil.ReadFile(changelogFile)
 	if err != nil {
 		if os.IsNotExist(err) {
-			// If the file doesn't exist, return an empty map
-			return "", nil
+			// If the file doesn't exist, return the first repo commit
+			firstSubProjectCommit, err := getFirstCommit(centralProjectRepo)
+			if err != nil {
+				return "", fmt.Errorf("error getting first commit for centralProject %s", err)
+			}
+			return firstSubProjectCommit, nil
 		}
 		return "", fmt.Errorf("error reading centralized changelog file: %v", err)
 	}

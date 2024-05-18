@@ -107,6 +107,4 @@ func getSubProjectByName(subProjects []config.SubProject, name string) *config.S
 }
 
 
-// TODO: Fix the increment of the central version as well [It doesn't increment] - Done
-// TODO: Fix the replicating of central history log [It keepy re-writing the whole history for central] - Done
 // TODO: A mechanism to stop writing logs if no new commits, maybe increase the version or introduce a build number
